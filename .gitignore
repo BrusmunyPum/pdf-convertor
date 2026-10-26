@@ -1,0 +1,21 @@
+node_modules/
+dist/
+.venv/
+__pycache__/
+*.pyc
+.env
+data/
+coverage/
+.DS_Store
+fonts/*
+!fonts/README.md
+*.tsbuildinfo
+*.log
+.pytest_cache/
+# local editor / tool settings
+.claude/
+.idea/
+.vscode/
+# database backups made on the server (deploy/backup-database.sh)
+deploy/backups/
+*.dump

@@ -1,0 +1,14 @@
+# Build context for the web image (nginx/Dockerfile) is the project root.
+# It only needs apps/web and nginx/: skip everything heavy or secret.
+**/node_modules/
+**/.venv/
+**/dist/
+**/__pycache__/
+apps/api/
+apps/converter/
+fonts/
+scripts/
+.env
+*.log
+deploy/
+**/.env

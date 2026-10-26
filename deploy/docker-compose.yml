@@ -1,0 +1,173 @@
+# ==============================================================================
+# DIGITECHKH PDF Converter - production stack (Ubuntu server)
+# ==============================================================================
+# Runs next to DIGITECHKH BMS on the same server:
+#   - uses the SAME PostgreSQL server as BMS (its own database + user, see setup-database.sh)
+#   - gateway on host port 4900 (BMS uses 4600), nothing else is published
+#   - every container / network / volume is prefixed "digitechkh-pdf", so nothing collides with BMS
+#
+#   cd deploy && cp .env.example .env   # fill it in
+#   ./setup-database.sh                 # once: create the database + user on the shared PostgreSQL
+#   ./rebuild.sh                        # build + start everything
+# ==============================================================================
+
+name: digitechkh-pdf
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  # ===================================================
+  # Nginx gateway: the only published port (/api -> api, everything else -> web)
+  # ===================================================
+  gateway:
+    container_name: digitechkh-pdf-gateway
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "${BIND_ADDRESS:-0.0.0.0}:${PORT_HTTP:-4900}:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    logging: *logging
+
+  # ===================================================
+  # Vue frontend (static files served by nginx)
+  # ===================================================
+  web:
+    container_name: digitechkh-pdf-web
+    image: digitechkh-pdf-web:latest
+    build:
+      context: ..
+      dockerfile: nginx/Dockerfile
+    restart: unless-stopped
+    networks:
+      - app_network
+    expose:
+      - "80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    logging: *logging
+
+  # ===================================================
+  # NestJS API (auth, credits, queue, admin, live updates)
+  # Runs the Prisma migrations on start, inside its own database only.
+  # ===================================================
+  api:
+    container_name: digitechkh-pdf-api
+    image: digitechkh-pdf-api:latest
+    build: ../apps/api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://${POSTGRES_USER:?POSTGRES_USER is required in .env}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required in .env}@${POSTGRES_HOST:-host.docker.internal}:${POSTGRES_PORT:-5434}/${POSTGRES_DB:?POSTGRES_DB is required in .env}?schema=public
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required in .env}
+      COOKIE_SECRET: ${COOKIE_SECRET:?COOKIE_SECRET is required in .env}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      CONVERTER_URL: http://converter:8000
+      DATA_DIR: /data
+    volumes:
+      - file_data:/data
+    # reach the shared PostgreSQL that runs on the host (same as BMS)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      redis:
+        condition: service_healthy
+      converter:
+        condition: service_healthy
+    networks:
+      - app_network
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/config').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    logging: *logging
+
+  # ===================================================
+  # Python converter (PDF -> Word / PowerPoint / Excel / CSV / images, Khmer OCR)
+  # ===================================================
+  converter:
+    container_name: digitechkh-pdf-converter
+    image: digitechkh-pdf-converter:latest
+    build: ../apps/converter
+    restart: unless-stopped
+    environment:
+      DATA_DIR: /data
+      FONTS_DIR: /app/fonts
+      EXTRA_FONTS_DIR: /fonts-extra
+      FONT_INDEX_CACHE: /data/.font-index
+      UVICORN_WORKERS: ${CONVERTER_WORKERS:-2}
+    volumes:
+      - file_data:/data
+      # extra .ttf/.otf fonts (Khmer OS, Khmer MEF1/MEF2...) embedded in DOCX
+      - ../fonts:/fonts-extra:ro
+    # big scanned PDFs + OCR use a lot of memory: keep it from starving BMS on the same server
+    mem_limit: ${CONVERTER_MEM_LIMIT:-3g}
+    networks:
+      - app_network
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    logging: *logging
+
+  # ===================================================
+  # Redis: conversion queue (internal only, its own instance)
+  # ===================================================
+  redis:
+    container_name: digitechkh-pdf-redis
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    logging: *logging
+
+networks:
+  app_network:
+    driver: bridge
+
+volumes:
+  # uploaded PDFs + converted files (deleted automatically after their TTL)
+  file_data:
+  redis_data:

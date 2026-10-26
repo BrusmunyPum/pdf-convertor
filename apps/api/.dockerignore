@@ -1,0 +1,5 @@
+# dependencies are installed inside the image; never send local ones or secrets
+node_modules/
+dist/
+.env
+*.log

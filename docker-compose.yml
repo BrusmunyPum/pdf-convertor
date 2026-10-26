@@ -1,0 +1,83 @@
+name: khmer-pdf-convertor
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-pdfconvert}
+      POSTGRES_USER: ${POSTGRES_USER:-pdfconvert}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pdfconvert} -d ${POSTGRES_DB:-pdfconvert}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  converter:
+    build: ./apps/converter
+    restart: unless-stopped
+    environment:
+      DATA_DIR: /data
+      FONTS_DIR: /app/fonts
+      EXTRA_FONTS_DIR: /fonts-extra
+      FONT_INDEX_CACHE: /data/.font-index
+      UVICORN_WORKERS: ${CONVERTER_WORKERS:-2}
+    volumes:
+      - filedata:/data
+      # Drop extra .ttf/.otf fonts here (e.g. Khmer OS, Khmer MEF1/MEF2) so they get embedded in DOCX
+      - ./fonts:/fonts-extra:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: ./apps/api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-pdfconvert}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-pdfconvert}?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      CONVERTER_URL: http://converter:8000
+      DATA_DIR: /data
+    volumes:
+      - filedata:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      converter:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-8080}:80"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  redisdata:
+  filedata:

@@ -1,0 +1,148 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum JobStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum CreditRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum CreditTxType {
+  SIGNUP_BONUS
+  CONVERSION
+  REFUND
+  ADMIN_ADJUST
+  REQUEST_APPROVED
+}
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  name         String
+  passwordHash String
+  role         Role      @default(USER)
+  credits      Int       @default(0)
+  isActive     Boolean   @default(true)
+  telegram     String?
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  jobs           ConversionJob[]
+  transactions   CreditTransaction[] @relation("TxUser")
+  creditRequests CreditRequest[]     @relation("RequestUser")
+  reviewed       CreditRequest[]     @relation("RequestReviewer")
+
+  @@index([createdAt])
+}
+
+model Guest {
+  id          String   @id
+  ipHash      String
+  creditsUsed Int      @default(0)
+  createdAt   DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+
+  jobs ConversionJob[]
+
+  @@index([ipHash])
+}
+
+model ConversionJob {
+  id             String    @id @default(uuid())
+  userId         String?
+  guestId        String?
+  ipHash         String?
+  originalName   String
+  inputPath      String
+  inputSize      Int
+  pageCount      Int       @default(0)
+  targetFormat   String
+  options        Json      @default("{}")
+  status         JobStatus @default(QUEUED)
+  progress       Int       @default(0)
+  outputPath     String?
+  outputName     String?
+  outputSize     Int?
+  error          String?
+  warnings       Json?
+  quality        Json?
+  creditsCharged Int       @default(0)
+  durationMs     Int?
+  downloadCount  Int       @default(0)
+  filesDeleted   Boolean   @default(false)
+  expiresAt      DateTime
+  createdAt      DateTime  @default(now())
+  startedAt      DateTime?
+  finishedAt     DateTime?
+
+  user  User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+  guest Guest? @relation(fields: [guestId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([guestId, createdAt])
+  @@index([status])
+  @@index([ipHash, createdAt])
+  @@index([expiresAt])
+}
+
+model CreditTransaction {
+  id           String       @id @default(uuid())
+  userId       String
+  amount       Int
+  balanceAfter Int
+  type         CreditTxType
+  note         String?
+  jobId        String?
+  actorId      String?
+  createdAt    DateTime     @default(now())
+
+  user User @relation("TxUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model CreditRequest {
+  id           String              @id @default(uuid())
+  code         String              @unique
+  userId       String
+  amount       Int
+  message      String?
+  status       CreditRequestStatus @default(PENDING)
+  adminNote    String?
+  grantedAmount Int?
+  reviewedById String?
+  reviewedAt   DateTime?
+  createdAt    DateTime            @default(now())
+
+  user     User  @relation("RequestUser", fields: [userId], references: [id], onDelete: Cascade)
+  reviewer User? @relation("RequestReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([userId, createdAt])
+}
+
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}

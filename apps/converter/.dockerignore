@@ -1,0 +1,6 @@
+# keep the build context small: the local virtualenv alone is ~330 MB
+.venv/
+**/__pycache__/
+.pytest_cache/
+tests/
+*.pyc

@@ -43,6 +43,19 @@ psql_admin() {
     psql -v ON_ERROR_STOP=1 -h "$DB_HOST" -p "$DB_PORT" -U "$PG_ADMIN" -d postgres "$@"
 }
 
+# The script sets POSTGRES_USER's password to the one in .env: never let that hit an account
+# something else signs in with (BMS's user, the admin account).
+if [ "$DB_USER" = "$PG_ADMIN" ]; then
+  echo "ERROR: POSTGRES_USER in .env is the admin account '$PG_ADMIN'. Give the converter its own user (e.g. pdf_convertor)."
+  exit 1
+fi
+if [ "$(psql_admin -tAc "SELECT 1 FROM pg_roles WHERE rolname = '$DB_USER'" </dev/null)" = "1" ]; then
+  echo "WARNING: user '$DB_USER' already exists. Its password will be changed to the one in .env;"
+  echo "         anything else that signs in as '$DB_USER' (for example BMS) would stop working."
+  read -rp "Continue only if '$DB_USER' belongs to the PDF converter. Continue? [y/N] " ok
+  [[ "$ok" =~ ^[Yy]$ ]] || { echo "Stopped. Nothing was changed."; exit 1; }
+fi
+
 echo "==> Creating user '$DB_USER' and database '$DB_NAME' (if missing)..."
 psql_admin -q <<SQL
 SELECT format('CREATE ROLE %I LOGIN', '$DB_USER') WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '$DB_USER')\gexec

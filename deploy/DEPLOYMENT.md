@@ -17,7 +17,7 @@ Internet ──HTTPS──► Cloudflare Tunnel (or host nginx + Certbot)
         │                          ├─► digitechkh-pdf-redis      queue (internal)
         │                          ├─► digitechkh-pdf-converter  Python :8000 (internal)
         │                          └─► host.docker.internal:5434 ─► shared PostgreSQL (same as BMS)
-        │                                                           database: pdf_converter
+        │                                                           database: pdf_convertor_db
         └── /*               ─► digitechkh-pdf-web        Vue SPA :80
 ```
 
@@ -26,7 +26,7 @@ Internet ──HTTPS──► Cloudflare Tunnel (or host nginx + Certbot)
 | Compose project | `digitechkh-bms` | `digitechkh-pdf` |
 | Gateway port | `4600` | **`4900`** |
 | PostgreSQL server | `host.docker.internal:5434` | same server |
-| Database / user | `bms_db_v2` / BMS user | `pdf_converter` / `pdf_converter` |
+| Database / user | `bms_db_v2` / BMS user | `pdf_convertor_db` / `pdf_convertor` (never the BMS user) |
 | Containers | `digitechkh-bms-*` | `digitechkh-pdf-*` |
 | Redis | — | own container, not published |
 
@@ -53,7 +53,7 @@ docker run --rm --add-host host.docker.internal:host-gateway postgres:18-alpine 
 If it says `no response`:
 - **PostgreSQL runs in Docker** and its port is published as `127.0.0.1:5434:5432`: containers cannot reach that. Publish it as `5434:5432`, and block it from the internet with the firewall (`sudo ufw deny 5434`). Or connect this stack to the PostgreSQL container's network and set `POSTGRES_HOST=<postgres container name>` and `POSTGRES_PORT=5432` in `.env`.
 - **PostgreSQL is installed on Ubuntu** (apt): in `postgresql.conf` set `listen_addresses = '*'`. In `pg_hba.conf` add:
-  `host  pdf_converter  pdf_converter  172.16.0.0/12  scram-sha-256`
+  `host  pdf_convertor_db  pdf_convertor  172.16.0.0/12  scram-sha-256`
   Then run `sudo systemctl reload postgresql`.
 
 ---
@@ -124,7 +124,7 @@ chmod 600 .env
 ./setup-database.sh
 ```
 
-The script asks for a PostgreSQL admin account (`postgres`, or the account BMS's database was created with). It creates the `pdf_converter` user and database and checks that the new user can sign in. BMS's database is not touched. Tables are created automatically by the API on first start (Prisma migrations).
+The script asks for a PostgreSQL admin account (`postgres`, or the account BMS's database was created with). It creates the `pdf_convertor` user and the `pdf_convertor_db` database and checks that the new user can sign in. BMS's database is not touched. Tables are created automatically by the API on first start (Prisma migrations).
 
 ---
 
@@ -202,7 +202,7 @@ sudo certbot --nginx -d pdf.digitechkh.site
 
 ### Backups
 ```bash
-./backup-database.sh                # → deploy/backups/pdf_converter-YYYYMMDD-HHMMSS.dump (keeps 14)
+./backup-database.sh                # → deploy/backups/pdf_convertor_db-YYYYMMDD-HHMMSS.dump (keeps 14)
 crontab -e                          # daily at 02:30:
 30 2 * * * /opt/digitechkh/pdf-converter/deploy/backup-database.sh >> /var/log/pdf-backup.log 2>&1
 ```

@@ -7,7 +7,7 @@
 #   30 2 * * * /opt/digitechkh/pdf-converter/deploy/backup-database.sh >> /var/log/pdf-backup.log 2>&1
 # Restore:
 #   docker run --rm -i -e PGPASSWORD=<POSTGRES_PASSWORD> --add-host host.docker.internal:host-gateway postgres:18-alpine \
-#     pg_restore --clean --if-exists -h host.docker.internal -p 5434 -U pdf_converter -d pdf_converter < backups/<file>.dump
+#     pg_restore --clean --if-exists -h host.docker.internal -p 5434 -U pdf_convertor -d pdf_convertor_db < backups/<file>.dump
 # Uploaded / converted files are temporary (deleted after their TTL), so they are not backed up.
 # ==============================================================================
 
